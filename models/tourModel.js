@@ -2,7 +2,9 @@ const mongoose = require('mongoose');
 const slugify = require('slugify');
 const validator = require('validator');
 
-const tourChema = new mongoose.Schema(
+// const User = require('./userModel');
+
+const tourSchema = new mongoose.Schema(
   {
     name: {
       type: String,
@@ -38,6 +40,7 @@ const tourChema = new mongoose.Schema(
       default: 4.5,
       min: [1, 'Rating must be above 1.0'],
       max: [5, 'Rating must be below 5.0'],
+      set: (val) => Math.round(val * 10) / 10,
     },
     ratingsQuantity: {
       type: Number,
@@ -69,7 +72,7 @@ const tourChema = new mongoose.Schema(
       type: String,
       require: [true, 'A tour must have a imageCover'],
     },
-    image: [String],
+    images: [String],
     createAt: {
       type: Date,
       default: Date.now(),
@@ -80,6 +83,36 @@ const tourChema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    startLocation: {
+      // GeoJSON
+      type: {
+        type: String,
+        default: 'Point',
+        enum: ['Point'],
+      },
+      coordinates: [Number],
+      address: String,
+      description: String,
+    },
+    locations: [
+      {
+        type: {
+          type: String,
+          default: 'Point',
+          enum: ['Point'],
+        },
+        coordinates: [Number],
+        address: String,
+        description: String,
+        day: Number,
+      },
+    ],
+    guides: [
+      {
+        type: mongoose.Schema.ObjectId,
+        ref: 'User',
+      },
+    ],
   },
   {
     toJSON: { virtuals: true },
@@ -87,46 +120,73 @@ const tourChema = new mongoose.Schema(
   }
 );
 
-tourChema.virtual('durationWeeks').get(function () {
+// tourSchema.index({ price: 1 });
+tourSchema.index({ price: 1, ratingsAverage: -1 });
+tourSchema.index({ slug: 1 });
+tourSchema.index({ startLocation: '2dsphere' });
+
+tourSchema.virtual('durationWeeks').get(function () {
   return this.duration / 7;
 });
 
+// Virtual populate
+tourSchema.virtual('reviews', {
+  ref: 'Review',
+  foreignField: 'tour',
+  localField: '_id',
+});
+
 // DOCUMENT MIDDLEWARE: run before .save() and .create()
-tourChema.pre('save', function (next) {
+tourSchema.pre('save', function (next) {
   this.slug = slugify(this.name, { lower: true });
   next();
 });
 
-// tourChema.pre('save', function (next) {
+// tourSchema.pre('save', async function (next) {
+//   const guidesPromises = this.guides.map(async (id) => await User.findById(id));
+//   this.guides = await Promise.all(guidesPromises);
+//   next();
+// });
+
+// tourSchema.pre('save', function (next) {
 //   console.log('Will save document...');
 //   next();
 // });
 
-// tourChema.post('save', function (doc, next) {
+// tourSchema.post('save', function (doc, next) {
 //   console.log(doc);
 //   next();
 // });
 
 // QUERY MIDDLEWARE
-// tourChema.pre('find', function (next) {
-tourChema.pre(/^find/, function (next) {
-  this.find({ secretTour: { $ne: false } });
-
+// tourSchema.pre('find', function (next) {
+tourSchema.pre(/^find/, function (next) {
+  this.find({ secretTour: { $ne: true } });
   this.start = Date.now();
   next();
 });
 
-tourChema.post(`/^find/`, function (doc, next) {
+tourSchema.pre(/^find/, function (next) {
+  this.populate({
+    path: 'guides',
+    // Loại bỏ trường ko cần lấy
+    select: '-__v -passwordChangedAt',
+  });
+  next();
+});
+
+tourSchema.post(/^find/, function (docs, next) {
   console.log(`Query took ${Date.now() - this.start} milliseconds`);
-  console.log(doc);
+  // console.log(docs);
+  next();
 });
 
 // AGGREGATION MIDDLEWARE
-tourChema.pre('aggregate', function (next) {
-  this.pipeline().unshift({ $match: { secretTour: { $ne: true } } });
-  console.log(this.pipeline());
-  next();
-});
-const Tour = mongoose.model('Tour', tourChema);
+// tourSchema.pre('aggregate', function (next) {
+//   this.pipeline().unshift({ $match: { secretTour: { $ne: true } } });
+//   console.log(this.pipeline());
+//   next();
+// });
+const Tour = mongoose.model('Tour', tourSchema);
 
 module.exports = Tour;
